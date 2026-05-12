@@ -51,6 +51,118 @@ fi
 
 Use these values when constructing the AskUserQuestion options below.
 
+## Step 0.6 — Pre-flight: detect existing `$KB_DIR` state (safety probe)
+
+Later steps will want to write into `$KB_DIR` (`~/.local/share/tstack/kb` by default). If a previous setup already cloned a kb there — or the user has been hand-editing it — naively `rm -rf`-ing it would destroy uncommitted work, untracked files, and unpushed commits. Probe the state once, before we touch anything, so every later destructive site can branch on it instead of clobbering blindly.
+
+```bash
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/tstack"
+KB_DIR="$DATA_DIR/kb"
+mkdir -p "$DATA_DIR"
+
+KB_STATE=""
+KB_PORCELAIN=""
+KB_UNPUSHED=""
+KB_REMOTE=""
+if [ ! -e "$KB_DIR" ]; then
+  KB_STATE="absent"
+elif [ -L "$KB_DIR" ]; then
+  KB_STATE="symlink"            # only the link is removed when we unlink; target is safe
+elif [ ! -d "$KB_DIR/.git" ]; then
+  KB_STATE="nonrepo"            # exists but isn't a git repo and isn't a symlink — refuse to touch
+else
+  KB_PORCELAIN="$(git -C "$KB_DIR" status --porcelain 2>/dev/null || true)"
+  if git -C "$KB_DIR" rev-parse --abbrev-ref @{u} >/dev/null 2>&1; then
+    KB_UNPUSHED="$(git -C "$KB_DIR" log --oneline @{u}..HEAD 2>/dev/null || true)"
+  fi
+  KB_REMOTE="$(git -C "$KB_DIR" remote get-url origin 2>/dev/null || true)"
+  if [ -z "$KB_PORCELAIN" ] && [ -z "$KB_UNPUSHED" ]; then
+    KB_STATE="clean"
+  else
+    KB_STATE="dirty"
+  fi
+fi
+echo "KB_STATE=$KB_STATE"
+echo "KB_REMOTE=$KB_REMOTE"
+[ -n "$KB_PORCELAIN" ] && { echo "Uncommitted/untracked:"; echo "$KB_PORCELAIN"; }
+[ -n "$KB_UNPUSHED"  ] && { echo "Unpushed commits:";       echo "$KB_UNPUSHED"; }
+```
+
+Carry `$KB_STATE`, `$KB_REMOTE`, `$KB_PORCELAIN`, `$KB_UNPUSHED` through to later steps.
+
+Branching rules used by Steps 1.5b and 3:
+
+- **`absent`** — nothing to do; the planned `git clone` or `ln -s` proceeds normally.
+- **`symlink`** — `rm "$KB_DIR"` (just the symlink, not the target it points to). Then proceed.
+- **`clean`** — `rm -rf "$KB_DIR"` is safe (no work to lose). Step 3 has an optimization for this case: if `$KB_REMOTE` matches the target `$SOURCE`, skip the re-clone and just `git fetch && git merge --ff-only` in place.
+- **`nonrepo`** — stop. Tell the user: *"`$KB_DIR` exists but isn't a git repo or a symlink. I won't remove it automatically. Move or delete it manually, then re-run `/tstack-setup`."* Do not write config. Stop the skill.
+- **`dirty`** — invoke **Step 0.7** before any destructive action. Do not `rm -rf` yet.
+
+## Step 0.7 — Resolve dirty `$KB_DIR` (only if `KB_STATE=dirty`)
+
+The user has work in `$KB_DIR` that you must not silently discard. Show them what's at risk — the `KB_PORCELAIN` and `KB_UNPUSHED` already printed in Step 0.6 are enough; reference them if you need.
+
+Then AskUserQuestion:
+
+> Your local kb at `$KB_DIR` has uncommitted work and/or unpushed commits. I won't overwrite it without your say-so. What should I do?
+>
+> A) Stash and re-apply *(Recommended if you're staying on the same kb source — least invasive)*
+> B) Commit my work as a `wip:` auto-save and rebase from origin
+> C) Back up the whole directory to `$KB_DIR.bak-<timestamp>` and continue with a fresh clone (use this if you're switching kb sources)
+> D) Stop — let me handle this manually and re-run `/tstack-setup` later
+
+If **D**: print "`/tstack-setup` aborted; `$KB_DIR` untouched." Do not write config. Stop the skill.
+
+If **A** (stash + fast-forward):
+
+```bash
+cd "$KB_DIR"
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+git stash push --include-untracked -m "tstack-setup pre-resync autostash $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+git fetch --quiet origin || true
+if git merge --ff-only --quiet "origin/$BRANCH"; then
+  if git stash pop; then
+    echo "Stash re-applied cleanly."
+  else
+    echo "Note: stash pop hit conflicts. Your work is safe in the stash — run 'git stash list' to find it."
+  fi
+else
+  git stash pop || true
+  echo "ERROR: fast-forward failed (local branch diverged from remote). Re-run /tstack-setup after reconciling, or pick option C next time to back up and re-clone."
+  # Stop the skill here. Do not write config.
+fi
+```
+
+If the fast-forward and stash-pop both succeed, skip Steps 1.5b/2/3 — the kb is already in the right state with the user's work preserved — and continue at **Step 4** (write config).
+
+If **B** (commit + rebase):
+
+```bash
+cd "$KB_DIR"
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+git add -A
+git commit -q -m "wip: tstack-setup auto-save before resync $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+git fetch --quiet origin || true
+if ! git rebase --quiet "origin/$BRANCH"; then
+  git rebase --abort
+  echo "ERROR: rebase hit conflicts. Your auto-save commit is on $BRANCH. Resolve manually, then re-run /tstack-setup."
+  # Stop the skill here. Do not write config.
+fi
+```
+
+If the rebase succeeds, skip Steps 1.5b/2/3 and continue at **Step 4**.
+
+If **C** (backup + continue):
+
+```bash
+BACKUP="$KB_DIR.bak-$(date +%Y%m%d-%H%M%S)"
+mv "$KB_DIR" "$BACKUP"
+echo "Backed up old kb to $BACKUP. Continuing with a fresh setup."
+KB_STATE="absent"   # so the rest of setup treats it as a clean slate
+```
+
+`$KB_DIR` is now absent. Continue with the originally-planned flow — Step 1.5b's clone for the create path, or Step 2/3 for the existing-kb path.
+
 ## Step 1 — Determine kb source via AskUserQuestion
 
 Construct the question dynamically based on `CURRENT_SOURCE` and `GH_AUTHED`:
@@ -108,13 +220,19 @@ If the command fails:
 - **Repo already exists**: ask the user if they want to use the existing repo instead. If yes: set `SOURCE="git@github.com:$OWNER/$REPO.git"`, `TYPE="git"`, skip to Step 2 (validate). If no: stop and ask them to pick a different name.
 - **Other errors**: surface the stderr verbatim, stop, and recommend they create the repo manually on GitHub, then re-run `/tstack-setup` with the URL.
 
-If successful, clone the empty repo into the canonical location:
+If successful, clone the empty repo into the canonical `$KB_DIR` (already defined in Step 0.6). Before cloning, handle any existing content per `$KB_STATE`:
 
 ```bash
-DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/tstack"
-KB_DIR="$DATA_DIR/kb"
-mkdir -p "$DATA_DIR"
-[ -e "$KB_DIR" ] && rm -rf "$KB_DIR"
+# $KB_DIR was defined in Step 0.6.
+# Step 0.7 should have already resolved a dirty state if there was one.
+case "$KB_STATE" in
+  absent)  ;;                                                                    # nothing to clean up
+  symlink) rm "$KB_DIR" ;;                                                       # remove the link only
+  clean)   rm -rf "$KB_DIR" ;;                                                   # no work to lose
+  dirty)   echo "ERROR: $KB_DIR is dirty. Run Step 0.7 first."; exit 1 ;;        # bug — shouldn't reach here
+  nonrepo) echo "ERROR: $KB_DIR isn't a git repo or symlink. Stopping."; exit 1 ;;
+esac
+
 git clone "git@github.com:$OWNER/$REPO.git" "$KB_DIR"
 ```
 
@@ -297,16 +415,67 @@ KB_DIR="$DATA_DIR/kb"
 mkdir -p "$DATA_DIR"
 ```
 
+`$KB_DIR` and `$KB_STATE` were set in Step 0.6; Step 0.7 has already resolved any dirty state if there was one.
+
 If the user picked a git URL:
+
 ```bash
-[ -e "$KB_DIR" ] && rm -rf "$KB_DIR"
-git clone --depth 50 "$SOURCE" "$KB_DIR"
+case "$KB_STATE" in
+  absent)
+    git clone --depth 50 "$SOURCE" "$KB_DIR"
+    ;;
+  symlink)
+    rm "$KB_DIR"
+    git clone --depth 50 "$SOURCE" "$KB_DIR"
+    ;;
+  clean)
+    if [ "$KB_REMOTE" = "$SOURCE" ]; then
+      # Same remote already cloned, no work to preserve — just refresh in place.
+      BRANCH="$(git -C "$KB_DIR" rev-parse --abbrev-ref HEAD)"
+      git -C "$KB_DIR" fetch --quiet origin || true
+      git -C "$KB_DIR" merge --ff-only --quiet "origin/$BRANCH" || true
+    else
+      rm -rf "$KB_DIR"
+      git clone --depth 50 "$SOURCE" "$KB_DIR"
+    fi
+    ;;
+  dirty)
+    echo "ERROR: $KB_DIR is dirty. Run Step 0.7 first."; exit 1
+    ;;
+  nonrepo)
+    echo "ERROR: $KB_DIR isn't a git repo or symlink. Stopping."; exit 1
+    ;;
+esac
 ```
 
 If the user picked a local path, symlink (no copy needed for local dev):
+
 ```bash
-[ -e "$KB_DIR" ] && rm -rf "$KB_DIR"
-ln -s "$SOURCE" "$KB_DIR"
+case "$KB_STATE" in
+  absent)
+    ln -s "$SOURCE" "$KB_DIR"
+    ;;
+  symlink)
+    # Already a symlink. If it points at $SOURCE, leave it; otherwise repoint.
+    CURRENT_LINK="$(readlink "$KB_DIR" 2>/dev/null || echo '')"
+    if [ "$CURRENT_LINK" != "$SOURCE" ]; then
+      rm "$KB_DIR"
+      ln -s "$SOURCE" "$KB_DIR"
+    fi
+    ;;
+  clean)
+    # An actual cloned git repo lives at $KB_DIR but the user just picked a local path source.
+    # No work to lose; replace with the symlink.
+    rm -rf "$KB_DIR"
+    ln -s "$SOURCE" "$KB_DIR"
+    ;;
+  dirty)
+    echo "ERROR: $KB_DIR is dirty. Run Step 0.7 first."; exit 1
+    ;;
+  nonrepo)
+    echo "ERROR: $KB_DIR isn't a git repo or symlink. Stopping."; exit 1
+    ;;
+esac
 ```
 
 If clone or symlink fails, surface the error and stop. Don't write config yet.
