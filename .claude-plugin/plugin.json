@@ -1,0 +1,10 @@
+{
+  "name": "tstack",
+  "version": "0.0.1",
+  "description": "Coding-agent-native engineering governance for Thermondo. Ships auras — passive skills that auto-activate at code-time to surface current architecture, paved-path, shipping, ownership, and domain knowledge from a configurable knowledge base.",
+  "author": {
+    "name": "Thermondo Engineering"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/thermondo/tstack"
+}

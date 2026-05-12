@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# tstack-bootstrap — sourced by every aura's preamble.
+#
+# Behavior:
+#   - If config missing: emit one breadcrumb per session, set TSTACK_READY=0, return.
+#   - If config present: background-pull kb if older than threshold, set TSTACK_READY=1.
+#
+# Usage (from an aura preamble bash block):
+#   source "$(dirname "$(command -v tstack-bootstrap)")/tstack-bootstrap"
+#   [ "$TSTACK_READY" = "1" ] || exit 0   # silently no-op if not configured
+
+# Note: NOT set -e here — this is sourced; we don't want to kill the parent shell.
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tstack"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/tstack"
+KB_DIR="$DATA_DIR/kb"
+LAST_PULL_FILE="$CACHE_DIR/last-pull-ts"
+PULL_INTERVAL_SECONDS=3600   # 1 hour
+
+mkdir -p "$CACHE_DIR" "$DATA_DIR"
+
+# Local override: TSTACK_KB_PATH points at a local dir instead of the cloned kb
+if [ -n "${TSTACK_KB_PATH:-}" ]; then
+  if [ -d "$TSTACK_KB_PATH" ]; then
+    export TSTACK_READY=1
+    export TSTACK_KB_DIR="$TSTACK_KB_PATH"
+    return 0 2>/dev/null || exit 0
+  fi
+fi
+
+# Check config exists
+if ! tstack-config exists; then
+  # Rate-limit the breadcrumb to once per session.
+  # Session is approximated by parent PID; works for prototype.
+  SESSION_MARKER="$CACHE_DIR/session-${PPID:-unknown}-breadcrumb"
+  if [ ! -f "$SESSION_MARKER" ]; then
+    echo "tstack: not configured. run /tstack-setup to enable." >&2
+    touch "$SESSION_MARKER"
+  fi
+  export TSTACK_READY=0
+  return 0 2>/dev/null || exit 0
+fi
+
+# Config exists → ensure kb present and fresh.
+if [ ! -d "$KB_DIR/.git" ] && [ ! -L "$KB_DIR" ]; then
+  # Config says configured but kb not cloned. Edge case (deleted manually?). Re-bootstrap.
+  echo "tstack: knowledge base directory missing. run /tstack-setup again." >&2
+  export TSTACK_READY=0
+  return 0 2>/dev/null || exit 0
+fi
+
+# Background pull if stale, fire-and-forget. Failure is non-fatal.
+NOW=$(date +%s)
+LAST=0
+[ -f "$LAST_PULL_FILE" ] && LAST=$(cat "$LAST_PULL_FILE" 2>/dev/null || echo 0)
+AGE=$((NOW - LAST))
+
+if [ "$AGE" -gt "$PULL_INTERVAL_SECONDS" ]; then
+  (
+    cd "$KB_DIR" 2>/dev/null && \
+    git fetch --quiet 2>/dev/null && \
+    git merge --ff-only --quiet 2>/dev/null && \
+    echo "$NOW" > "$LAST_PULL_FILE"
+  ) &
+  disown 2>/dev/null || true
+fi
+
+export TSTACK_READY=1
+export TSTACK_KB_DIR="$KB_DIR"
+return 0 2>/dev/null || exit 0

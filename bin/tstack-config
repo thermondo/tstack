@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# tstack-config — get/set values in ~/.config/tstack/config.json
+#
+# Usage:
+#   tstack-config get <key>           # prints value to stdout, empty if unset
+#   tstack-config set <key> <value>   # atomic write, creates file if missing
+#   tstack-config path                # prints the config file path
+#   tstack-config exists              # exit 0 if config file exists, 1 otherwise
+
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tstack"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+
+cmd="${1:-}"
+
+case "$cmd" in
+  path)
+    echo "$CONFIG_FILE"
+    ;;
+  exists)
+    [ -f "$CONFIG_FILE" ] && exit 0 || exit 1
+    ;;
+  get)
+    key="${2:-}"
+    [ -z "$key" ] && { echo "usage: tstack-config get <key>" >&2; exit 2; }
+    [ ! -f "$CONFIG_FILE" ] && { echo ""; exit 0; }
+    jq -r --arg k "$key" '.[$k] // ""' "$CONFIG_FILE"
+    ;;
+  set)
+    key="${2:-}"
+    value="${3:-}"
+    [ -z "$key" ] && { echo "usage: tstack-config set <key> <value>" >&2; exit 2; }
+    mkdir -p "$CONFIG_DIR"
+    chmod 700 "$CONFIG_DIR"
+    tmp=$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")
+    if [ -f "$CONFIG_FILE" ]; then
+      jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$CONFIG_FILE" > "$tmp"
+    else
+      jq -n --arg k "$key" --arg v "$value" '{($k): $v}' > "$tmp"
+    fi
+    chmod 600 "$tmp"
+    mv "$tmp" "$CONFIG_FILE"
+    ;;
+  *)
+    echo "usage: tstack-config {get|set|path|exists}" >&2
+    exit 2
+    ;;
+esac
