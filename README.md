@@ -6,15 +6,6 @@ Coding-agent-native engineering governance. tstack ships **auras** — passive s
 
 ## Quick install
 
-**At Thermondo** (once tstack is registered in the `thermondo-ai-stack/claude-plugins` marketplace):
-
-```
-/plugin install tstack@thermondo-ai-stack
-/tstack-setup
-```
-
-**For local development, or to try the prototype before the marketplace entry exists:**
-
 ```bash
 git clone https://github.com/thermondo/tstack.git
 cd tstack
@@ -96,4 +87,4 @@ Auth uses git's standard mechanisms (SSH keys, `gh` CLI credentials, git credent
 
 ## License
 
-Apache-2.0
+Apache-2.0 — see [LICENSE](LICENSE).
