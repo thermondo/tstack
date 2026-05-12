@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "thermondo-tstack",
+  "version": "0.0.1",
+  "owner": {
+    "name": "Thermondo Engineering",
+    "url": "https://github.com/thermondo"
+  },
+  "plugins": [
+    {
+      "name": "tstack",
+      "description": "Coding-agent-native engineering governance. Ships auras — passive skills that auto-activate at code-time to surface architecture, paved-path, shipping, ownership, and domain knowledge from a configurable knowledge base.",
+      "version": "0.0.1",
+      "author": {
+        "name": "Thermondo Engineering"
+      },
+      "source": "./",
+      "category": "development",
+      "homepage": "https://github.com/thermondo/tstack"
+    }
+  ]
+}

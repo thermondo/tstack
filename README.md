@@ -2,9 +2,24 @@
 
 Coding-agent-native engineering governance. tstack ships **auras** — passive skills that sit in your coding agent and fire on intent, without slash commands — pointed at a configurable knowledge base (e.g. `thermondo/tstack-kb`) holding your team's architecture decisions, tech-radar choices, and ownership facts.
 
-**Status: prototype.** Do not install in production.
+## Install
 
-## Quick install
+Pick one. All three install end-user-side from this public repo; no private marketplace is required.
+
+**Direct install** — one command, no auto-update tracking:
+
+```
+/plugin install tstack@thermondo/tstack
+```
+
+**Marketplace install** — two commands; future updates land via `/plugin marketplace update`:
+
+```
+/plugin marketplace add thermondo/tstack
+/plugin install tstack@thermondo-tstack
+```
+
+**Local dev** — clone and load for hacking on tstack itself (see [Local development](#local-development) for the inner loop):
 
 ```bash
 git clone https://github.com/thermondo/tstack.git
@@ -12,13 +27,7 @@ cd tstack
 claude --plugin-dir .
 ```
 
-Then inside the agent:
-
-```
-/tstack-setup
-```
-
-`/tstack-setup` walks you through pointing at your knowledge base (a git URL or local path) — or creating one for you from scratch and optionally seeding it from your existing wiki, repos, Notion, Linear, or Slack via whatever source MCPs are installed in the session — validates access, clones the kb, and runs a health check. After that, auras auto-activate based on what you ask the agent to do.
+Then inside the agent, run `/tstack-setup`. It walks you through pointing at your knowledge base (a git URL or local path) — or creating one for you from scratch and optionally seeding it from your existing wiki, repos, Notion, Linear, or Slack via whatever source MCPs are installed in the session — validates access, clones the kb, and runs a health check. After that, auras auto-activate based on what you ask the agent to do.
 
 ## Auras
 
@@ -63,12 +72,12 @@ After editing `skills/` or `bin/` files, run `/reload-plugins` inside Claude Cod
 ## Auras shipped
 
 - `/tstack-setup` — explicit setup skill (not an aura — runs once after install or to reconfigure).
-- `architecture-aura` *(steering)* — fires on architecture-shaped work: service design, where-does-this-live, extend-vs-build, services-list. Reads `ARCHITECTURE.md`.
-- `paved-path-aura` *(steering)* — fires when you're picking a library, framework, vendor, hosting target, or starting a task with a sanctioned recipe. Reads `PAVED_PATH.md`.
-- `how-we-ship-aura` *(steering)* — fires on shipping-shaped work: code conventions, tests, PR/review, CI/CD, deploys, IaC, repo settings, DNS/CDN. Reads `SHIPPING.md`.
-- `people-aura` *(assistance)* — fires on ownership/routing questions: who owns X, who's the [role], who do I ping. Reads `PEOPLE.md`.
-- `domain-aura` *(assistance)* — fires when you're starting work in an unfamiliar product domain: what is X, who's the customer, why are we building this. Reads `DOMAINS.md`.
-- `loremaster-aura` *(side-effect)* — watches your conversation for decisions and identifications, and offers to add them to the right kb file. Detects whether the kb source is a local dir, a git repo, or a GitHub remote, and uses the matching workflow (edit / commit / push / PR via `gh`). Asks before every write.
+- `architecture-aura` _(steering)_ — fires on architecture-shaped work: service design, where-does-this-live, extend-vs-build, services-list. Reads `ARCHITECTURE.md`.
+- `paved-path-aura` _(steering)_ — fires when you're picking a library, framework, vendor, hosting target, or starting a task with a sanctioned recipe. Reads `PAVED_PATH.md`.
+- `how-we-ship-aura` _(steering)_ — fires on shipping-shaped work: code conventions, tests, PR/review, CI/CD, deploys, IaC, repo settings, DNS/CDN. Reads `SHIPPING.md`.
+- `people-aura` _(assistance)_ — fires on ownership/routing questions: who owns X, who's the [role], who do I ping. Reads `PEOPLE.md`.
+- `domain-aura` _(assistance)_ — fires when you're starting work in an unfamiliar product domain: what is X, who's the customer, why are we building this. Reads `DOMAINS.md`.
+- `loremaster-aura` _(side-effect)_ — watches your conversation for decisions and identifications, and offers to add them to the right kb file. Detects whether the kb source is a local dir, a git repo, or a GitHub remote, and uses the matching workflow (edit / commit / push / PR via `gh`). Asks before every write.
 
 ## Configuration
 
